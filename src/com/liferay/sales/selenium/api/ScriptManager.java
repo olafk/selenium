@@ -48,6 +48,7 @@ public abstract class ScriptManager {
     /**
      * Breaks down the CSV record into an array list.
      * If the line starts with a # then the line is deemed a comment
+     *
      * @param row the CSV line
      * @return A List of Strings or null if the line is a comment
      */
