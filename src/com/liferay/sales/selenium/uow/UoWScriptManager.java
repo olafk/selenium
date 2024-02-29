@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 
 public class UoWScriptManager extends ScriptManager {
     private static final Map<String, ClickpathConfig<ClickpathBase>> CLICKPATH_CONFIG_MAP;
-    private static final int CONNECTION_DELAY = 15000;
     private static final ExecutorService EXECUTOR_SERVICE = Executors.newFixedThreadPool(1);
     private static final boolean IS_MAC = System.getProperty("os.name").equalsIgnoreCase("Mac OS X");
     private static final String[] VPN_COMMAND = new String[]{"---OSASCRIPT---", "-e",
@@ -58,6 +57,8 @@ public class UoWScriptManager extends ScriptManager {
             final String defaultUsersCSVPathname = "./users.csv";
             final boolean defaultUseVpn = false;
             final String defaultVpnCSVPathname = "./vpn.csv";
+            final int defaultVpnConnectionSleep = 15000;
+            final int defaultVpnConnectRetries = 3;
             final WebDriverType defaultWebDriverType = WebDriverType.CHROME;
             final String defaultOsaScriptPathname = "/usr/bin/osascript";
             final String defaultTunnelblickPathname = "/Applications/Tunnelblick.app";
@@ -65,7 +66,8 @@ public class UoWScriptManager extends ScriptManager {
             final ClickpathTypeSelection defaultClickpathTypeSelection = ClickpathTypeSelection.ALL;
 
             CommandLine cmd = parseArguments(args, defaultBaseUrl, defaultAnonymousCycles, defaultKnownUserCycles,
-                    defaultUsersCSVPathname, defaultUseVpn, defaultVpnCSVPathname, defaultWebDriverType, defaultOsaScriptPathname,
+                    defaultUsersCSVPathname, defaultUseVpn, defaultVpnCSVPathname, defaultVpnConnectRetries,
+                    defaultVpnConnectionSleep, defaultWebDriverType, defaultOsaScriptPathname,
                     defaultTunnelblickPathname, defaultClickpathSelection, defaultClickpathTypeSelection);
 
             if (cmd != null) {
@@ -95,6 +97,24 @@ public class UoWScriptManager extends ScriptManager {
                 final String usersCSVPathname = cmd.hasOption("users") ? cmd.getOptionValue("users")
                         : defaultUsersCSVPathname;
 
+                if (usersCSVPathname != null) {
+                    log("User accounts in " + usersCSVPathname);
+                }
+                String[][] users = null;
+                if (usersCSVPathname != null) {
+                    if (doesFileExist(usersCSVPathname)) {
+                        users = readUserCSV(usersCSVPathname);
+                        log("The number of users for the known user cycles is " + users.length);
+                    } else {
+                        log(usersCSVPathname + " was not found");
+                    }
+                }
+
+                if (users == null || users.length == 0) {
+                    log("There are no user accounts. The known user cycles will be set to 0");
+                    knownUserCycles = 0;
+                }
+
                 boolean useVpn = defaultUseVpn;
                 if (cmd.hasOption("use-vpn")) {
                     useVpn = true;
@@ -102,6 +122,49 @@ public class UoWScriptManager extends ScriptManager {
 
                 final String vpnsCSVPathname = cmd.hasOption("vpns") ? cmd.getOptionValue("vpns")
                         : defaultVpnCSVPathname;
+
+                if (vpnsCSVPathname != null) {
+                    log("VPN(s) in " + vpnsCSVPathname);
+                }
+
+                String[] vpnNames = null;
+                if (useVpn && vpnsCSVPathname != null) {
+                    if (doesFileExist(vpnsCSVPathname)) {
+                        vpnNames = readVpnCsv(vpnsCSVPathname);
+                        log("The number of vpn names for the cycles is " + vpnNames.length);
+                    } else {
+                        log(vpnsCSVPathname + " was not found");
+                        useVpn = false;
+                    }
+                } else if (useVpn) {
+                    log("No pathname was supplied for the vpn names");
+                    useVpn = false;
+                }
+
+                log(useVpn ? "The VPN(s) will be used" : "The VPN(s) will NOT be used");
+
+                int vpnRetries;
+                try {
+                    vpnRetries = cmd.hasOption("vpn-retries") ? Integer.parseInt(cmd.getOptionValue("vpn-retries"))
+                            : defaultVpnConnectRetries;
+                } catch (NumberFormatException e) {
+                    log("Could not parse value as integer: " + cmd.getOptionValue("vpn-retries"));
+                    vpnRetries = defaultVpnConnectRetries;
+                }
+
+                int vpnWaitMillis;
+                try {
+                    vpnWaitMillis = cmd.hasOption("vpn-wait") ? Integer.parseInt(cmd.getOptionValue("vpn-wait"))
+                            : defaultVpnConnectionSleep;
+                } catch (NumberFormatException e) {
+                    log("Could not parse value as integer: " + cmd.getOptionValue("vpn-wait"));
+                    vpnWaitMillis = defaultVpnConnectionSleep;
+                }
+
+                if (useVpn) {
+                    log("VPN connection retries is " + vpnRetries);
+                    log("VPN connection wait is " + vpnWaitMillis);
+                }
 
                 WebDriverType webDriverType = defaultWebDriverType;
                 if (cmd.hasOption("driver")) {
@@ -177,23 +240,6 @@ public class UoWScriptManager extends ScriptManager {
                 log("Running " + anonymousCycles + " anonymous cycles");
                 log("Running " + knownUserCycles + " known user cycles");
 
-                if (vpnsCSVPathname != null) {
-                    log("VPN(s) in " + vpnsCSVPathname);
-                }                String[] vpnNames = null;
-                if (useVpn && vpnsCSVPathname != null) {
-                    if (doesFileExist(vpnsCSVPathname)) {
-                        vpnNames = readVpnCsv(vpnsCSVPathname);
-                        log("The number of vpn names for the cycles is " + vpnNames.length);
-                    } else {
-                        log(vpnsCSVPathname + " was not found");
-                        useVpn = false;
-                    }
-                } else {
-                    log("No pathname was supplied for the vpn names");
-                    useVpn = false;
-                }
-                log(useVpn ? "The VPN(s) will be used" : "The VPN(s) will NOT be used");
-
                 System.out.print("Driving " + webDriverType + " with " + webDriverPathname);
                 if (webDriverArguments.length > 0) {
                     System.out.print(" using \"");
@@ -201,24 +247,6 @@ public class UoWScriptManager extends ScriptManager {
                     log("\"");
                 } else {
                     log("");
-                }
-
-                if (usersCSVPathname != null) {
-                    log("User accounts in " + usersCSVPathname);
-                }
-                String[][] users = null;
-                if (usersCSVPathname != null) {
-                    if (doesFileExist(usersCSVPathname)) {
-                        users = readUserCSV(usersCSVPathname);
-                        log("The number of users for the known user cycles is " + users.length);
-                    } else {
-                        log(vpnsCSVPathname + " was not found");
-                    }
-                }
-
-                if (users == null || users.length == 0) {
-                    log("There are no user accounts. The known user cycles will be set to 0");
-                    knownUserCycles = 0;
                 }
 
                 switch (webDriverType) {
@@ -234,7 +262,7 @@ public class UoWScriptManager extends ScriptManager {
                 }
 
                 doIt(webDriverType, webDriverArguments, baseUrl, anonymousCycles, knownUserCycles, users, useVpn,
-                        vpnNames, osaScriptPathname, tunnelblickPathname, clickpathSelection);
+                        vpnNames, vpnRetries, vpnWaitMillis, osaScriptPathname, tunnelblickPathname, clickpathSelection);
             }
         } catch (Throwable e) {
             e.printStackTrace();
@@ -250,6 +278,7 @@ public class UoWScriptManager extends ScriptManager {
                                               final int defaultAnonymousCycles,
                                               final int defaultKnownUserCycles, final String defaultUserCsvPathname,
                                               final boolean defaultUseVpn, final String defaultVpnCsvPathname,
+                                              final int defaultVpnConnectRetries, final int defaultVpnConnectionSleep,
                                               final WebDriverType defaultWebDriverType,
                                               final String defaultOsaScriptPathname,
                                               final String defaultTunnelblickPathnameOption,
@@ -289,6 +318,18 @@ public class UoWScriptManager extends ScriptManager {
                         + defaultVpnCsvPathname);
         vpnCsvOption.setRequired(false);
         options.addOption(vpnCsvOption);
+
+        final Option vpnRetriesOption = new Option(null, "vpn-retries", true,
+                "The number of times to retry the VPN connection. The default is "
+                        + defaultVpnConnectRetries);
+        vpnRetriesOption.setRequired(false);
+        options.addOption(vpnRetriesOption);
+
+        final Option vpnSleepOption = new Option(null, "vpn-wait", true,
+                "The time in milliseconds to wait for the VPN to connect. The default is "
+                        + defaultVpnConnectionSleep);
+        vpnSleepOption.setRequired(false);
+        options.addOption(vpnSleepOption);
 
         final Option webDriverOption = new Option("d", "driver", true,
                 "The web driver to use, i.e. chrome or firefox. The default is "
@@ -366,7 +407,7 @@ public class UoWScriptManager extends ScriptManager {
 
     public static void doIt(final WebDriverType webDriverType, final String[] webDriverArguments, final String baseUrl,
                             final int anonymousCycles, final int knownUserCycles, final String[][] users, final boolean useVpn,
-                            final String[] vpnNames, final String osaScriptPathname, final String tunnelblickPathname, String[] clickpathSelection) {
+                            final String[] vpnNames, final int vpnRetries, final int vpnWaitMillis, final String osaScriptPathname, final String tunnelblickPathname, String[] clickpathSelection) {
         final ClickpathBase[] paths = buildPathsArray(baseUrl, clickpathSelection, webDriverType, webDriverArguments);
 
         final int pathCount = paths.length;
@@ -401,7 +442,7 @@ public class UoWScriptManager extends ScriptManager {
 
             if (useVpn) {
                 try {
-                    vpnConnect(osaScriptPathname, tunnelblickPathname, vpnName, null);
+                    vpnConnect(osaScriptPathname, tunnelblickPathname, vpnName, vpnWaitMillis, null);
                 } catch (IOException e) {
                     log(e.getMessage());
                 }
@@ -410,7 +451,7 @@ public class UoWScriptManager extends ScriptManager {
             userSequence(path, null, null, pathIndex, i, anonymousCycles, start, log);
             if (useVpn) {
                 try {
-                    vpnDisconnect(osaScriptPathname, tunnelblickPathname, vpnName);
+                    vpnDisconnect(osaScriptPathname, tunnelblickPathname, vpnName, vpnWaitMillis);
                 } catch (IOException e) {
                     log(e.getMessage());
                 }
@@ -432,7 +473,7 @@ public class UoWScriptManager extends ScriptManager {
 
             if (useVpn) {
                 try {
-                    vpnConnect(osaScriptPathname, tunnelblickPathname, vpnName, user[0]);
+                    vpnConnect(osaScriptPathname, tunnelblickPathname, vpnName, vpnWaitMillis, user[0]);
                 } catch (IOException e) {
                     log(e.getMessage());
                 }
@@ -442,7 +483,7 @@ public class UoWScriptManager extends ScriptManager {
 
             if (useVpn) {
                 try {
-                    vpnDisconnect(osaScriptPathname, tunnelblickPathname, vpnName);
+                    vpnDisconnect(osaScriptPathname, tunnelblickPathname, vpnName, vpnWaitMillis);
                 } catch (IOException e) {
                     log(e.getMessage());
                 }
@@ -494,7 +535,7 @@ public class UoWScriptManager extends ScriptManager {
     }
 
     private static void vpnConnect(final String osaScriptPathname, final String tunnelblickPathname,
-                                   final String vpnName, final String username) throws IOException {
+                                   final String vpnName, final int vpnWait, final String username) throws IOException {
         if (!IS_MAC) {
             log("This is not an OS X environment");
             return;
@@ -519,8 +560,8 @@ public class UoWScriptManager extends ScriptManager {
             if (exitCode > 0) {
                 throw new RuntimeException("Unable to connect to vpn");
             }
-            log("Waiting for " + CONNECTION_DELAY + "ms");
-            Thread.sleep(CONNECTION_DELAY);
+            log("Waiting for " + vpnWait + "ms");
+            Thread.sleep(vpnWait);
         } catch (IllegalAccessException e) {
             throw new RuntimeException("Unable to connect to vpn", e);
         } catch (InterruptedException e) {
@@ -565,7 +606,7 @@ public class UoWScriptManager extends ScriptManager {
     }
 
     private static void vpnDisconnect(final String osaScriptPathname, final String tunnelblickPathname,
-                                      final String vpnName) throws IOException {
+                                      final String vpnName, final int vpnWait) throws IOException {
         if (!IS_MAC) {
             log("This is not an OS X environment");
             return;
@@ -590,8 +631,8 @@ public class UoWScriptManager extends ScriptManager {
             if (exitCode > 0) {
                 throw new RuntimeException("Unable to connect to vpn");
             }
-            log("Waiting for " + CONNECTION_DELAY + "ms");
-            Thread.sleep(CONNECTION_DELAY);
+            log("Waiting for " + vpnWait + "ms");
+            Thread.sleep(vpnWait);
         } catch (IllegalAccessException e) {
             throw new RuntimeException("Unable to connect to vpn", e);
         } catch (InterruptedException e) {
