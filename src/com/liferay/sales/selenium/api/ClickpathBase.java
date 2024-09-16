@@ -250,9 +250,9 @@ public abstract class ClickpathBase {
     /**
      * Navigate to URL, then sleep for default interval
      *
-     * @param url the url to navigate to
+     * @param url             the url to navigate to
      * @param numberOfRetries the number of retires to attempt before reporting exception
-     * @param millis the time in milliseconds to wait before retrying
+     * @param millis          the time in milliseconds to wait before retrying
      */
     protected void doGoTo(final String url, final int numberOfRetries, final int millis) {
         final String absoluteUrl;

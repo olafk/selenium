@@ -3,6 +3,7 @@ package com.liferay.sales.selenium.api;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 import java.util.stream.IntStream;
 
@@ -29,8 +30,10 @@ public abstract class ScriptManager {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
                 final String line = scanner.nextLine();
-                final ArrayList<String> record = readCsvRecord(line);
-                if (record.size() == 2) {
+                final List<String> record = readCsvRecord(line);
+                if (record == null) {
+                    continue; // It assumed to be a comment so ignore
+                } else if (record.size() == 2) {
                     records.add(record.toArray(String[]::new));
                 } else {
                     throw new IllegalArgumentException("The CSV record returned the wrong number of column values. Expected 1 and received " + record.size());
@@ -42,9 +45,19 @@ public abstract class ScriptManager {
         return records.toArray(String[][]::new);
     }
 
-    private static ArrayList<String> readCsvRecord(String row) {
+    /**
+     * Breaks down the CSV record into an array list.
+     * If the line starts with a # then the line is deemed a comment
+     *
+     * @param row the CSV line
+     * @return A List of Strings or null if the line is a comment
+     */
+    private static List<String> readCsvRecord(String row) {
+        if (row.startsWith("#")) {
+            return null;
+        }
         try (Scanner rowScanner = new Scanner(row)) {
-            ArrayList<String> values = new ArrayList<>();
+            List<String> values = new ArrayList<>();
             rowScanner.useDelimiter(",");
             while (rowScanner.hasNext()) {
                 values.add(rowScanner.next().trim());
@@ -75,8 +88,10 @@ public abstract class ScriptManager {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
                 final String line = scanner.nextLine();
-                final ArrayList<String> record = readCsvRecord(line);
-                if (record.size() == 1) {
+                final List<String> record = readCsvRecord(line);
+                if (record == null) {
+                    continue; // It assumed to be a comment so ignore
+                } else if (record.size() == 1) {
                     records.add(record.get(0));
                 } else {
                     throw new IllegalArgumentException("The CSV record returned the wrong number of column values. Expected 1 and received " + record.size());
